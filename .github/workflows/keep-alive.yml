@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────
+# HARU 데모 유지 작업
+#
+#  1) Supabase 무료 플랜은 7일간 요청이 없으면 프로젝트를 정지시킵니다.
+#     매일 호출해 정지를 막습니다.
+#  2) 동시에 데모 공고의 근무일을 '오늘 기준'으로 평행 이동시켜,
+#     시간이 지나도 추천·지원·긴급 배지가 죽지 않게 합니다.
+#
+#  아래 키는 publishable(anon) 키입니다. 브라우저 번들에도 포함되는
+#  공개 전제 키이므로 저장소에 노출되어도 문제가 없습니다.
+#  실제 접근 제어는 데이터베이스의 RLS 정책이 담당합니다.
+#  service_role 키는 절대 이 파일에 넣지 마십시오.
+# ─────────────────────────────────────────────────────────────
+name: keep-alive
+
+on:
+  schedule:
+    # 매일 20:23 UTC = 한국시간 05:23
+    # 정각은 GitHub Actions 부하로 지연이 잦아 피했습니다.
+    - cron: '23 20 * * *'
+  workflow_dispatch:        # 수동 실행 버튼
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Supabase 깨우기 + 데모 날짜 갱신
+        env:
+          SUPABASE_URL: https://ioerdyzbqdnnlccrhnqr.supabase.co
+          SUPABASE_KEY: sb_publishable_h63Fm4OJ3f__evR62b-rlg_YbfKzp-M
+        run: |
+          echo "실행 시각(KST): $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')"
+          RES=$(curl -fsS --retry 3 --retry-delay 20 --max-time 60 \
+            -X POST \
+            -H "apikey: ${SUPABASE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "${SUPABASE_URL}/rest/v1/rpc/refresh_demo_dates")
+          echo "결과: ${RES}"
+          echo "${RES}" | grep -q '"ok": *true' || { echo "::error::갱신 실패"; exit 1; }
+
+      - name: 배포 사이트 응답 확인
+        run: |
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+            https://haru-smoky-omega.vercel.app/)
+          echo "사이트 응답: HTTP ${CODE}"
+          [ "$CODE" = "200" ] || { echo "::error::사이트 응답 이상"; exit 1; }
